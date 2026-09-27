@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "../supabaseClient";
 
+// --- Types ---
 type OrderItem = {
   id: string;
   productName: string;
@@ -11,7 +13,7 @@ type OrderItem = {
 type Sale = {
   id: number;
   date: string;
-  platform: "TikTok" | "Shopee";
+  platform: "Tik Tok" | "Shopee";
   sales: number;
   orders: number;
   items: OrderItem[];
@@ -37,8 +39,7 @@ type Page =
 
 type TableData = Record<string, Record<string, string>>;
 
-const SALES_KEY = "mamariam-sales-dashboard-data-v3";
-
+// --- Constants ---
 const POPULAR_PRODUCTS = [
   "Susu Mamariam (Original)",
   "Susu Mamariam (Coklat)",
@@ -56,20 +57,18 @@ const PLATFORM_COLUMNS: Record<
 > = {
   facebook: {
     title: "Facebook",
-    icon: "🔵",
+    icon: "📘",
     columns: [
       "Ads On/Off",
       "Leads Ads",
       "Comment Replies",
-      "FB Personal - Video",
       "FB Personal - Poster",
-      "FB Page - Video",
       "FB Page - Poster",
     ],
   },
   instagram: {
     title: "Instagram",
-    icon: "🟣",
+    icon: "📸",
     columns: [
       "Focus Grow Susu YGrow",
       "Current Post",
@@ -79,23 +78,21 @@ const PLATFORM_COLUMNS: Record<
       "Morning",
       "Afternoon",
       "Evening",
-      "Draft Copywriting",
     ],
   },
   telegram: {
     title: "Telegram",
-    icon: "🔷",
+    icon: "✈️",
     columns: [
       "Focus Grow Susu YGrow",
       "Update Subscribers",
       "Poster",
       "Afternoon",
-      "Draft Copywriting",
     ],
   },
   "tiktok-farming": {
     title: "TikTok Farming",
-    icon: "⚫",
+    icon: "🌾",
     columns: [
       "Daily Content Draft",
       "Poster Posting",
@@ -106,7 +103,7 @@ const PLATFORM_COLUMNS: Record<
   },
   "tiktok-live": {
     title: "TikTok Live",
-    icon: "🎵",
+    icon: "🎥",
     columns: [
       "Live Schedule",
       "Total Live Hours",
@@ -117,7 +114,7 @@ const PLATFORM_COLUMNS: Record<
   },
   "shopee-live": {
     title: "Shopee Live",
-    icon: "🟠",
+    icon: "🛍️",
     columns: [
       "Live Schedule",
       "Total Live Hours",
@@ -129,13 +126,16 @@ const PLATFORM_COLUMNS: Record<
 };
 
 const LIVE_SCHEDULE = [
-  { day: "Sunday", time: "2:00 PM – 3:30 PM" },
-  { day: "Monday", time: "12:35 PM – 2:05 PM" },
-  { day: "Tuesday", time: "3:00 PM – 4:30 PM" },
-  { day: "Wednesday", time: "4:45 PM – 5:30 PM" },
-  { day: "Thursday", time: "4:30 PM – 5:30 PM" },
+  { day: "Sunday", time: "2:00 PM - 3:30 PM" },
+  { day: "Monday", time: "12:35 PM - 2:05 PM" },
+  { day: "Tuesday", time: "3:00 PM - 4:30 PM" },
+  { day: "Wednesday", time: "4:45 PM - 5:30 PM" },
+  { day: "Thursday", time: "4:30 PM - 5:30 PM" },
 ];
 
+const MALAY_DAYS = ["Ahad", "Isnin", "Selasa", "Rabu", "Khamis", "Jumaat", "Sabtu"];
+
+// --- Helper Functions ---
 function formatRM(value: number) {
   return `RM ${value.toFixed(2)}`;
 }
@@ -168,20 +168,9 @@ function getLast7Days() {
   return result;
 }
 
-const MALAY_DAYS = [
-  "Ahad",
-  "Isnin",
-  "Selasa",
-  "Rabu",
-  "Khamis",
-  "Jumaat",
-  "Sabtu",
-];
-
 function getDaysInMonth(year: number, month: number) {
   const date = new Date(year, month - 1, 1);
   const days: { dateStr: string; dayName: string; dayNum: number }[] = [];
-
   while (date.getMonth() === month - 1) {
     const yearStr = date.getFullYear();
     const monthStr = String(date.getMonth() + 1).padStart(2, "0");
@@ -198,6 +187,7 @@ function getDaysInMonth(year: number, month: number) {
   return days;
 }
 
+// --- Component Utama ---
 export default function Home() {
   const [page, setPage] = useState<Page>("dashboard");
   const [salesData, setSalesData] = useState<Sale[]>([]);
@@ -205,35 +195,91 @@ export default function Home() {
 
   useEffect(() => {
     setMounted(true);
-    const savedSales = localStorage.getItem(SALES_KEY);
-    if (savedSales) {
-      try {
-        setSalesData(JSON.parse(savedSales));
-      } catch (e) {
-        console.error("Failed to parse saved sales", e);
-      }
-    }
+    loadSales();
   }, []);
 
-  useEffect(() => {
-    if (mounted) {
-      localStorage.setItem(SALES_KEY, JSON.stringify(salesData));
-    }
-  }, [salesData, mounted]);
+  async function loadSales() {
+    const { data, error } = await supabase
+      .from("sales")
+      .select("*")
+      .order("date", { ascending: true });
 
-  function addSale(sale: Omit<Sale, "id">) {
-    setSalesData((prev) => [
-      ...prev,
-      {
-        ...sale,
-        id: Date.now(),
-      },
-    ]);
+    if (error) {
+      console.error("Failed to load sales:", error);
+      return;
+    }
+
+    // Map snake_case dari Supabase ke camelCase
+    const formattedData: Sale[] = (data || []).map((row: any) => ({
+      id: row.id,
+      date: row.date,
+      platform: row.platform,
+      sales: row.sales,
+      orders: row.orders,
+      items: row.items || [],
+      productSummary: row.product_summary,
+      liveHours: row.live_hours,
+      isNoSales: row.is_no_sales,
+    }));
+
+    setSalesData(formattedData);
   }
 
-  function deleteSale(id: number) {
-    if (!window.confirm("Are you sure you want to delete this sales record?")) return;
+  async function addSale(sale: Omit<Sale, "id">) {
+    const { data, error } = await supabase
+      .from("sales")
+      .insert([
+        {
+          date: sale.date,
+          platform: sale.platform,
+          sales: sale.sales,
+          orders: sale.orders,
+          items: sale.items,
+          product_summary: sale.productSummary,
+          live_hours: sale.liveHours,
+          is_no_sales: sale.isNoSales ?? false,
+        },
+      ])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Failed to save sale:", error);
+      alert("Gagal simpan sales: " + error.message);
+      return;
+    }
+
+    const newSale: Sale = {
+      id: data.id,
+      date: data.date,
+      platform: data.platform,
+      sales: data.sales,
+      orders: data.orders,
+      items: data.items || [],
+      productSummary: data.product_summary,
+      liveHours: data.live_hours,
+      isNoSales: data.is_no_sales,
+    };
+
+    setSalesData((prev) => [...prev, newSale]);
+    alert("Sales entry berjaya disimpan ke Supabase! ✨");
+  }
+
+  async function deleteSale(id: number) {
+    if (!window.confirm("Adakah anda pasti ingin memadam rekod jualan ini?")) {
+      return;
+    }
+
+    const { error } = await supabase.from("sales").delete().eq("id", id);
+
+    if (error) {
+      console.error("Failed to delete sale:", error);
+      alert("Gagal delete sales: " + error.message);
+      return;
+    }
+
     setSalesData((prev) => prev.filter((sale) => sale.id !== id));
+    alert("Sales record berjaya dipadam.");
   }
 
   if (!mounted) {
@@ -258,17 +304,13 @@ export default function Home() {
           {page === "dashboard" && (
             <Dashboard salesData={salesData} setPage={setPage} />
           )}
-
           {page === "sales-entry" && (
             <SalesEntry addSale={addSale} setPage={setPage} />
           )}
-
           {page === "sales-history" && (
             <SalesHistory salesData={salesData} deleteSale={deleteSale} />
           )}
-
           {page === "schedule" && <SchedulePage />}
-
           {page in PLATFORM_COLUMNS && (
             <ExcelTodoPage platformKey={page as PlatformKey} />
           )}
@@ -278,6 +320,8 @@ export default function Home() {
   );
 }
 
+// --- Sub Components ---
+
 function Sidebar({
   page,
   setPage,
@@ -286,19 +330,19 @@ function Sidebar({
   setPage: (page: Page) => void;
 }) {
   const mainNav: { id: Page; label: string; icon: string }[] = [
-    { id: "dashboard", label: "Dashboard", icon: "✨" },
+    { id: "dashboard", label: "Dashboard", icon: "📊" },
     { id: "sales-entry", label: "Sales Entry", icon: "➕" },
-    { id: "sales-history", label: "Sales History", icon: "🧾" },
-    { id: "schedule", label: "Live Schedule", icon: "🗓️" },
+    { id: "sales-history", label: "Sales History", icon: "📜" },
+    { id: "schedule", label: "Live Schedule", icon: "📅" },
   ];
 
   const platformNav: { id: PlatformKey; label: string; icon: string }[] = [
-    { id: "facebook", label: "Facebook", icon: "🔵" },
-    { id: "instagram", label: "Instagram", icon: "🟣" },
-    { id: "telegram", label: "Telegram", icon: "🔷" },
-    { id: "tiktok-farming", label: "TikTok Farming", icon: "⚫" },
-    { id: "tiktok-live", label: "TikTok Live", icon: "🎵" },
-    { id: "shopee-live", label: "Shopee Live", icon: "🟠" },
+    { id: "facebook", label: "Facebook", icon: "📘" },
+    { id: "instagram", label: "Instagram", icon: "📸" },
+    { id: "telegram", label: "Telegram", icon: "✈️" },
+    { id: "tiktok-farming", label: "TikTok Farming", icon: "🌾" },
+    { id: "tiktok-live", label: "TikTok Live", icon: "🎥" },
+    { id: "shopee-live", label: "Shopee Live", icon: "🛍️" },
   ];
 
   return (
@@ -306,7 +350,7 @@ function Sidebar({
       <div className="p-6 border-b border-[#f3d3c8]/50 bg-gradient-to-r from-white/80 to-[#fdf2ee]/50">
         <div className="inline-flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-[#d97c65] to-[#f2aa99] flex items-center justify-center text-white text-lg shadow-md shadow-[#d97c65]/30 font-bold">
-            🌸
+            M
           </div>
           <div>
             <div className="text-xl font-black tracking-tight text-[#5a3227]">
@@ -422,13 +466,15 @@ function PageHeader({
 
 function ExcelTodoPage({ platformKey }: { platformKey: PlatformKey }) {
   const config = PLATFORM_COLUMNS[platformKey];
-
   const [selectedMonth, setSelectedMonth] = useState("2026-09");
   const [data, setData] = useState<TableData>({});
+  const [loading, setLoading] = useState(true);
+  const [saveStatus, setSaveStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
 
-  const storageKey = useMemo(() => {
-    return `mamariam-todo-${platformKey}-${selectedMonth}`;
-  }, [platformKey, selectedMonth]);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestDataRef = useRef<TableData>({});
 
   const [year, month] = useMemo(() => {
     const parts = selectedMonth.split("-");
@@ -440,35 +486,96 @@ function ExcelTodoPage({ platformKey }: { platformKey: PlatformKey }) {
   }, [year, month]);
 
   useEffect(() => {
-    const saved = localStorage.getItem(storageKey);
-    if (saved) {
-      try {
-        setData(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse spreadsheet data", e);
+    let cancelled = false;
+    async function loadData() {
+      setLoading(true);
+      setSaveStatus("idle");
+      const { data: row, error } = await supabase
+        .from("platform_todos")
+        .select("data")
+        .eq("platform_key", platformKey)
+        .eq("month", selectedMonth)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Failed to load todo sheet:", error);
         setData({});
+        latestDataRef.current = {};
+        setLoading(false);
+        return;
       }
-    } else {
-      setData({});
+
+      const loaded = (row?.data as TableData) || {};
+      setData(loaded);
+      latestDataRef.current = loaded;
+      setLoading(false);
     }
-  }, [storageKey]);
+
+    loadData();
+
+    return () => {
+      cancelled = true;
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [platformKey, selectedMonth]);
+
+  async function persistData(toSave: TableData) {
+    setSaveStatus("saving");
+    const { error } = await supabase.from("platform_todos").upsert(
+      {
+        platform_key: platformKey,
+        month: selectedMonth,
+        data: toSave,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "platform_key, month" }
+    );
+
+    if (error) {
+      console.error("Failed to save todo sheet:", error);
+      setSaveStatus("error");
+      return;
+    }
+
+    setSaveStatus("saved");
+  }
 
   const handleCellChange = (dateStr: string, colName: string, val: string) => {
-    const updated = {
-      ...data,
+    const updated: TableData = {
+      ...latestDataRef.current,
       [dateStr]: {
-        ...(data[dateStr] || {}),
+        ...(latestDataRef.current[dateStr] || {}),
         [colName]: val,
       },
     };
+
     setData(updated);
-    localStorage.setItem(storageKey, JSON.stringify(updated));
+    latestDataRef.current = updated;
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(() => {
+      persistData(updated);
+    }, 800);
   };
 
   const monthLabel = useMemo(() => {
     const d = new Date(year, month - 1, 1);
     return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   }, [year, month]);
+
+  const statusLabel = {
+    idle: "Semua entri akan disimpan ke Supabase secara automatik.",
+    saving: "Menyimpan...",
+    saved: "Disimpan ke Supabase ✨",
+    error: "Gagal simpan, sila cuba lagi.",
+  }[saveStatus];
 
   return (
     <>
@@ -492,9 +599,7 @@ function ExcelTodoPage({ platformKey }: { platformKey: PlatformKey }) {
                 className="border border-[#e0cdc5] rounded-xl px-4 py-2.5 text-sm font-medium text-[#4a2e26] bg-[#fffaf8] outline-none focus:ring-2 focus:ring-[#8c5243]/30 transition"
               />
             </div>
-
             <div className="hidden sm:block border-l border-[#f0ded5] h-10 mx-2" />
-
             <div className="hidden sm:block">
               <span className="text-xs text-[#9e7a6f] block font-medium">
                 Active Period
@@ -505,86 +610,97 @@ function ExcelTodoPage({ platformKey }: { platformKey: PlatformKey }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-[#8c675c] bg-[#faf0eb] px-3.5 py-2 rounded-xl font-medium border border-[#f0ded5]">
-            <span>💡</span>
-            <span>All entries are automatically saved to local storage.</span>
+          <div
+            className={`flex items-center gap-2 text-xs px-3.5 py-2 rounded-xl font-medium border ${
+              saveStatus === "error"
+                ? "text-red-600 bg-red-50 border-red-200"
+                : "text-[#8c675c] bg-[#faf0eb] border-[#f0ded5]"
+            }`}
+          >
+            <span>
+              {saveStatus === "saving" ? "⏳" : saveStatus === "error" ? "⚠️" : "✓"}
+            </span>
+            <span>{statusLabel}</span>
           </div>
         </div>
 
         <div className="bg-white/90 backdrop-blur-md border border-[#f3d3c8] rounded-2xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto max-h-[70vh] custom-scrollbar">
-            <table className="w-full text-sm border-collapse min-w-[900px]">
-              <thead>
-                <tr className="bg-gradient-to-r from-[#f8ede8] to-[#f4e2da] text-[#5c3b31] border-b border-[#e8d5cc] sticky top-0 z-10 shadow-sm">
-                  <th className="py-3.5 px-4 font-bold text-left sticky left-0 bg-[#f8ede8] border-r border-[#e8d5cc] w-28 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                    Date
-                  </th>
-                  <th className="py-3.5 px-4 font-bold text-left sticky left-28 bg-[#f8ede8] border-r border-[#e8d5cc] w-28 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                    Day
-                  </th>
-                  {config.columns.map((col) => (
-                    <th
-                      key={col}
-                      className="py-3.5 px-4 font-bold text-left min-w-[170px] border-r border-[#e8d5cc] last:border-r-0 whitespace-nowrap"
-                    >
-                      {col}
+          {loading ? (
+            <div className="p-12 flex items-center justify-center gap-3 text-[#8c5243] font-semibold text-sm">
+              <div className="w-6 h-6 rounded-full border-4 border-[#e8a598] border-t-transparent animate-spin" />
+              Loading data dari Supabase...
+            </div>
+          ) : (
+            <div className="overflow-x-auto max-h-[70vh] custom-scrollbar">
+              <table className="w-full text-sm border-collapse min-w-[900px]">
+                <thead>
+                  <tr className="bg-gradient-to-r from-[#f8ede8] to-[#f4e2da] text-[#5c3b31] border-b border-[#e8d5cc] sticky top-0 z-10 shadow-sm">
+                    <th className="py-3.5 px-4 font-bold text-left sticky left-0 bg-[#f8ede8] border-r border-[#e8d5cc] w-28 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
+                      Date
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#f3e6df]">
-                {daysList.map(({ dateStr, dayName, dayNum }) => {
-                  const isRedDay = dayName === "Jumaat" || dayName === "Sabtu";
-
-                  return (
-                    <tr
-                      key={dateStr}
-                      className={`hover:bg-[#faefe9] transition-colors ${
-                        isRedDay ? "bg-red-50/50" : "bg-white/50"
-                      }`}
-                    >
-                      <td className="py-2 px-4 font-semibold text-[#5c3b31] border-r border-[#eddcd3] sticky left-0 bg-inherit z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                        {dayNum} {monthLabel.split(" ")[0]}
-                      </td>
-
-                      {/* RED BOLD HIGHLIGHT FOR JUMAAT & SABTU */}
-                      <td className="py-2 px-4 border-r border-[#eddcd3] sticky left-28 bg-inherit z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                        <span
-                          className={`inline-block px-2.5 py-0.5 rounded text-xs ${
-                            isRedDay
-                              ? "text-red-600 font-black bg-red-100/80 border border-red-200 tracking-wide"
-                              : "text-[#6b4e45] font-semibold"
-                          }`}
-                        >
-                          {dayName}
-                        </span>
-                      </td>
-
-                      {config.columns.map((col) => {
-                        const cellValue = data[dateStr]?.[col] || "";
-                        return (
-                          <td
-                            key={col}
-                            className="p-1 border-r border-[#f1e2da] last:border-r-0"
+                    <th className="py-3.5 px-4 font-bold text-left sticky left-28 bg-[#f8ede8] border-r border-[#e8d5cc] w-28 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
+                      Day
+                    </th>
+                    {config.columns.map((col) => (
+                      <th
+                        key={col}
+                        className="py-3.5 px-4 font-bold text-left min-w-[170px] border-r border-[#e8d5cc] last:border-r-0 whitespace-nowrap"
+                      >
+                        {col}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#f3e6df]">
+                  {daysList.map(({ dateStr, dayName, dayNum }) => {
+                    const isRedDay = dayName === "Jumaat" || dayName === "Sabtu";
+                    return (
+                      <tr
+                        key={dateStr}
+                        className={`hover:bg-[#faefe9] transition-colors ${
+                          isRedDay ? "bg-red-50/50" : "bg-white/50"
+                        }`}
+                      >
+                        <td className="py-2 px-4 font-semibold text-[#5c3b31] border-r border-[#eddcd3] sticky left-0 bg-inherit z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
+                          {dayNum} {monthLabel.split(" ")[0]}
+                        </td>
+                        <td className="py-2 px-4 border-r border-[#eddcd3] sticky left-28 bg-inherit z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
+                          <span
+                            className={`inline-block px-2.5 py-0.5 rounded text-xs ${
+                              isRedDay
+                                ? "text-red-600 font-black bg-red-100/80 border border-red-200 tracking-wide"
+                                : "text-[#6b4e45] font-semibold"
+                            }`}
                           >
-                            <input
-                              type="text"
-                              value={cellValue}
-                              onChange={(e) =>
-                                handleCellChange(dateStr, col, e.target.value)
-                              }
-                              placeholder="-"
-                              className="w-full h-full px-3 py-1.5 bg-transparent border border-transparent rounded-lg text-sm text-[#4a2e26] focus:bg-white focus:border-[#8c5243]/50 focus:ring-1 focus:ring-[#8c5243]/50 outline-none transition"
-                            />
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                            {dayName}
+                          </span>
+                        </td>
+                        {config.columns.map((col) => {
+                          const cellValue = data[dateStr]?.[col] || "";
+                          return (
+                            <td
+                              key={col}
+                              className="p-1 border-r border-[#f1e2da] last:border-r-0"
+                            >
+                              <input
+                                type="text"
+                                value={cellValue}
+                                onChange={(e) =>
+                                  handleCellChange(dateStr, col, e.target.value)
+                                }
+                                placeholder="-"
+                                className="w-full h-full px-3 py-1.5 bg-transparent border border-transparent rounded-lg text-sm text-[#4a2e26] focus:bg-white focus:border-[#8c5243]/50 focus:ring-1 focus:ring-[#8c5243]/50 outline-none transition"
+                              />
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -619,7 +735,6 @@ function Dashboard({
   const totalHours = salesData.reduce((a, b) => a + b.liveHours, 0);
 
   const last7Days = getLast7Days();
-
   const chartData = last7Days.map((date) => ({
     date,
     sales: salesData
@@ -628,17 +743,15 @@ function Dashboard({
   }));
 
   const tikTokSales = salesData
-    .filter((x) => x.platform === "TikTok")
+    .filter((x) => x.platform === "Tik Tok")
     .reduce((a, b) => a + b.sales, 0);
 
   const shopeeSales = salesData
     .filter((x) => x.platform === "Shopee")
     .reduce((a, b) => a + b.sales, 0);
 
-  // Aggregated top product items sold (quantity)
   const productStats = useMemo(() => {
     const map: Record<string, { quantity: number }> = {};
-
     salesData.forEach((s) => {
       if (s.items && s.items.length > 0) {
         s.items.forEach((item) => {
@@ -674,25 +787,25 @@ function Dashboard({
           <KpiCard
             title="Today's Sales"
             value={formatRM(todaySales)}
-            icon="🌤️"
+            icon="💰"
             subtitle="Daily summary"
           />
           <KpiCard
             title="This Week"
             value={formatRM(weekSales)}
-            icon="📅"
+            icon="📈"
             subtitle="Past 7 days performance"
           />
           <KpiCard
             title="This Month"
             value={formatRM(monthSales)}
-            icon="🗓️"
+            icon="📅"
             subtitle="Current month total"
           />
           <KpiCard
             title="Total Revenue"
             value={formatRM(totalSales)}
-            icon="💰"
+            icon="💵"
             subtitle="Accumulated sales"
           />
         </div>
@@ -712,11 +825,9 @@ function Dashboard({
           <SmallKpi
             title="Avg. Revenue / Live Hour"
             value={
-              totalHours > 0
-                ? formatRM(totalSales / totalHours)
-                : "RM 0.00"
+              totalHours > 0 ? formatRM(totalSales / totalHours) : "RM 0.00"
             }
-            icon="🚀"
+            icon="⚡"
           />
         </div>
 
@@ -736,15 +847,11 @@ function Dashboard({
 
             <div className="h-[220px] flex items-end gap-3 pt-4">
               {chartData.map((item) => {
-                const max = Math.max(
-                  ...chartData.map((x) => x.sales),
-                  1
-                );
+                const max = Math.max(...chartData.map((x) => x.sales), 1);
                 const height =
                   item.sales > 0
                     ? Math.max((item.sales / max) * 160, 14)
                     : 10;
-
                 return (
                   <div
                     key={item.date}
@@ -768,16 +875,14 @@ function Dashboard({
 
           <div className="bg-white/80 backdrop-blur-md rounded-2xl border border-[#f3d3c8] p-6 shadow-sm flex flex-col justify-between">
             <div>
-              <h2 className="font-bold text-lg text-[#4a2e26]">
-                By Platform
-              </h2>
+              <h2 className="font-bold text-lg text-[#4a2e26]">By Platform</h2>
               <p className="text-xs text-[#9a786d] mt-0.5 mb-6">
                 Platform revenue share
               </p>
 
               <div className="space-y-5">
                 <PlatformBar
-                  name="TikTok"
+                  name="Tik Tok"
                   value={tikTokSales}
                   total={totalSales}
                   color="bg-[#4a2e26]"
@@ -797,7 +902,7 @@ function Dashboard({
           </div>
         </div>
 
-        {/* Aggregated Top Products Ordered Chart */}
+        {/* Aggregated Top Products Ordered */}
         <div className="bg-white/80 backdrop-blur-md rounded-2xl border border-[#f3d3c8] p-6 shadow-sm">
           <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
             <div>
@@ -825,12 +930,10 @@ function Dashboard({
                   <div key={prod.name} className="space-y-1">
                     <div className="flex justify-between text-xs font-bold text-[#4a2e26]">
                       <span className="flex items-center gap-2">
-                        <span>📦</span>
+                        <span>🏷️</span>
                         {prod.name}
                       </span>
-                      <span className="text-[#8c5243]">
-                        {prod.quantity} units
-                      </span>
+                      <span className="text-[#8c5243]">{prod.quantity} units</span>
                     </div>
                     <div className="h-3.5 bg-[#faf0eb] rounded-full overflow-hidden p-0.5 border border-[#f0ded5]">
                       <div
@@ -863,7 +966,6 @@ function Dashboard({
               + New Sales Entry
             </button>
           </div>
-
           <div className="overflow-x-auto">
             <SalesTable sales={salesData.slice(-5).reverse()} compact />
           </div>
@@ -938,7 +1040,6 @@ function PlatformBar({
   color: string;
 }) {
   const percent = total > 0 ? Math.round((value / total) * 100) : 0;
-
   return (
     <div>
       <div className="flex justify-between text-xs font-bold text-[#4a2e26] mb-1.5">
@@ -966,21 +1067,19 @@ function SalesEntry({
   setPage: (page: Page) => void;
 }) {
   const [date, setDate] = useState(getToday());
-  const [platform, setPlatform] = useState<"TikTok" | "Shopee">("TikTok");
+  const [platform, setPlatform] = useState<"Tik Tok" | "Shopee">("Tik Tok");
   const [liveHours, setLiveHours] = useState("");
   const [salesAmount, setSalesAmount] = useState("");
   const [isNoSales, setIsNoSales] = useState(false);
 
-  // Dynamic multi-product items (Unit price removed)
   const [items, setItems] = useState<OrderItem[]>([
     {
       id: "1",
-      productName: "Susu Mamariam",
+      productName: "Susu Mamariam (Original)",
       quantity: 1,
     },
   ]);
 
-  // Total items ordered count
   const calculatedTotalQty = useMemo(() => {
     if (isNoSales) return 0;
     return items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
@@ -1050,7 +1149,6 @@ function SalesEntry({
       });
     }
 
-    // Reset form
     setItems([
       {
         id: String(Date.now()),
@@ -1061,7 +1159,6 @@ function SalesEntry({
     setLiveHours("");
     setSalesAmount("");
     setIsNoSales(false);
-    alert("Sales entry recorded successfully!");
   }
 
   return (
@@ -1076,7 +1173,7 @@ function SalesEntry({
           onSubmit={submit}
           className="bg-white/80 backdrop-blur-xl border border-[#f3d3c8] rounded-3xl p-6 md:p-10 shadow-xl shadow-[#8c5243]/5 space-y-8 transition-all"
         >
-          {/* General Stream Details */}
+          {/* Stream Details */}
           <div className="grid md:grid-cols-3 gap-5 border-b border-[#f5e5dd] pb-6">
             <div>
               <label className="block text-xs font-bold text-[#8c675c] uppercase tracking-wider mb-2">
@@ -1098,11 +1195,11 @@ function SalesEntry({
               <select
                 value={platform}
                 onChange={(e) =>
-                  setPlatform(e.target.value as "TikTok" | "Shopee")
+                  setPlatform(e.target.value as "Tik Tok" | "Shopee")
                 }
                 className="w-full border border-[#e0cdc5] rounded-xl px-4 py-2.5 text-sm text-[#4a2e26] outline-none focus:ring-2 focus:ring-[#8c5243]/30 bg-white font-medium"
               >
-                <option value="TikTok">TikTok</option>
+                <option value="Tik Tok">TikTok</option>
                 <option value="Shopee">Shopee</option>
               </select>
             </div>
@@ -1122,7 +1219,7 @@ function SalesEntry({
             </div>
           </div>
 
-          {/* NO SALES TODAY TOGGLE OPTION */}
+          {/* Toggle No Sales */}
           <div className="p-4 rounded-2xl bg-gradient-to-r from-[#fff4f0] to-[#fdeee8] border border-[#f0c8bc] flex items-center justify-between shadow-xs">
             <div className="flex items-center gap-3">
               <span className="text-xl">🛑</span>
@@ -1143,11 +1240,11 @@ function SalesEntry({
                 onChange={(e) => setIsNoSales(e.target.checked)}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-[#e0cdc5] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#8c5243]"></div>
+              <div className="w-11 h-6 bg-[#e0cdc5] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#8c5243]" />
             </label>
           </div>
 
-          {/* DYNAMIC PRODUCTS ORDER SECTION (Disabled if No Sales is ON) */}
+          {/* Dynamic Products Order Section */}
           {!isNoSales ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -1156,7 +1253,7 @@ function SalesEntry({
                     Products Ordered (Bilangan Order Produk)
                   </h3>
                   <p className="text-xs text-[#9a786d]">
-                    Select products and enter quantity sold (No Unit Price required)
+                    Select products and enter quantity sold
                   </p>
                 </div>
                 <button
@@ -1180,7 +1277,6 @@ function SalesEntry({
                       #{idx + 1}
                     </span>
 
-                    {/* Product Autocomplete Dropdown */}
                     <div className="flex-1">
                       <input
                         type="text"
@@ -1195,7 +1291,6 @@ function SalesEntry({
                       />
                     </div>
 
-                    {/* Quantity Field */}
                     <div className="w-full md:w-36">
                       <div className="flex items-center border border-[#e0cdc5] rounded-xl overflow-hidden bg-white">
                         <span className="px-3 text-[11px] font-bold text-[#9a786d] bg-[#faf0eb] py-2 border-r border-[#e0cdc5]">
@@ -1218,7 +1313,6 @@ function SalesEntry({
                       </div>
                     </div>
 
-                    {/* Remove Item Row */}
                     {items.length > 1 && (
                       <button
                         type="button"
@@ -1226,7 +1320,7 @@ function SalesEntry({
                         className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-xl text-xs font-bold transition shrink-0 self-end md:self-center"
                         title="Remove Item"
                       >
-                        ❌
+                        ✕
                       </button>
                     )}
                   </div>
@@ -1252,7 +1346,7 @@ function SalesEntry({
             </div>
           )}
 
-          {/* Total Sales Input Amount */}
+          {/* Revenue Sales Amount */}
           <div className="pt-2 border-t border-[#f5e5dd]">
             <label className="block text-xs font-bold text-[#8c675c] uppercase tracking-wider mb-2">
               Total Revenue Sales Amount (RM)
@@ -1327,7 +1421,7 @@ function SalesHistory({
                 className="border border-[#e0cdc5] rounded-xl px-4 py-2 text-sm font-medium text-[#4a2e26] bg-white outline-none"
               >
                 <option value="All">All Platforms</option>
-                <option value="TikTok">TikTok</option>
+                <option value="Tik Tok">Tik Tok</option>
                 <option value="Shopee">Shopee</option>
               </select>
             </div>
@@ -1402,7 +1496,7 @@ function SalesTable({
             <td className="py-4 px-6">
               <span
                 className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
-                  item.platform === "TikTok"
+                  item.platform === "Tik Tok"
                     ? "bg-[#4a2e26] text-white"
                     : "bg-[#fceee8] text-[#d47853]"
                 }`}
